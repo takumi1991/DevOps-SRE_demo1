@@ -6,8 +6,14 @@ terraform {
 }
 
 provider "google" {
-  project = var.project_id
-  region  = var.region
+  project     = var.project_id
+  region      = var.region
+  credentials = var.google_credentials_json
+}
+
+variable "google_credentials_json" {
+  type      = string
+  sensitive = true
 }
 
 # 必要なAPIを有効化
