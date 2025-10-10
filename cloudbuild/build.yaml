@@ -1,0 +1,17 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      [ "build", "-t", "$_AR_HOST/$_PROJECT/$PROJECT_ID/demo-repo/demo:$COMMIT_SHA", "./app" ]
+  - name: gcr.io/cloud-builders/docker
+    args:
+      [ "push", "$_AR_HOST/$_PROJECT/$PROJECT_ID/demo-repo/demo:$COMMIT_SHA" ]
+  - name: gcr.io/cloud-builders/gcloud
+    args:
+      [ "artifacts", "docker", "tags", "add",
+        "$_AR_HOST/$_PROJECT/$PROJECT_ID/demo-repo/demo:$COMMIT_SHA",
+        "$_AR_HOST/$_PROJECT/$PROJECT_ID/demo-repo/demo:latest" ]
+substitutions:
+  _AR_HOST: "REGION-docker.pkg.dev"
+  _PROJECT: ""   # 空でOK（projectID直下）
+images:
+  - "$_AR_HOST/$_PROJECT/$PROJECT_ID/demo-repo/demo:$COMMIT_SHA"
