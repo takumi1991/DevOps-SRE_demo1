@@ -1,10 +1,7 @@
 terraform {
   required_version = ">= 1.6.0"
   required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 5.40"
-    }
+    google = { source = "hashicorp/google", version = "~> 5.40" }
   }
 }
 
@@ -14,15 +11,15 @@ provider "google" {
   credentials = var.google_credentials_json
 }
 
-# 主要API（既に有効でもOK：IaCで明示）
+# 必要API（GKEは除外）
 resource "google_project_service" "services" {
   for_each = toset([
-    "container.googleapis.com",
+    "run.googleapis.com",
     "artifactregistry.googleapis.com",
     "cloudbuild.googleapis.com",
     "monitoring.googleapis.com",
     "logging.googleapis.com",
-    "secretmanager.googleapis.com",
+    "iam.googleapis.com",
     "serviceusage.googleapis.com"
   ])
   project = var.project_id
@@ -30,7 +27,7 @@ resource "google_project_service" "services" {
   disable_on_destroy = false
 }
 
-# Artifact Registry (Docker)
+# Artifact Registry（Dockerレポ：既存があればそのまま使える）
 resource "google_artifact_registry_repository" "repo" {
   location      = var.region
   repository_id = "demo-repo"
@@ -39,17 +36,27 @@ resource "google_artifact_registry_repository" "repo" {
   depends_on    = [google_project_service.services]
 }
 
-# GKE Autopilot クラスタ
-resource "google_container_cluster" "autopilot" {
-  name              = "gke-autopilot-demo"
-  location          = var.region
-  enable_autopilot  = true
-  release_channel { channel = "REGULAR" }
-  deletion_protection = false
-  depends_on        = [google_project_service.services]
+# まずは公開のサンプルイメージでデモ（自前ビルド不要）
+# 後で自作イメージに差し替え可：REGION-docker.pkg.dev/PROJECT/demo-repo/hello:latest
+resource "google_cloud_run_v2_service" "hello" {
+  name     = "hello-demo"
+  location = var.region
+
+  template {
+    # Cloud Run 推奨の公開イメージ（8080で応答）
+    containers {
+      image = "us-docker.pkg.dev/cloudrun/container/hello:latest"
+      ports { container_port = 8080 }
+    }
+  }
+
+  depends_on = [google_project_service.services]
 }
 
-# 参考：必要になったら後で追加（Cloud Armor / Monitoring Alert など）
-# - google_compute_security_policy
-# - google_monitoring_notification_channel
-# - google_monitoring_alert_policy
+# 認証なしでの呼び出しを許可（URL直アクセス可）
+resource "google_cloud_run_v2_service_iam_member" "invoker_all" {
+  name     = google_cloud_run_v2_service.hello.name
+  location = var.region
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
