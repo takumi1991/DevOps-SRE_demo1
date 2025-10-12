@@ -27,13 +27,11 @@ resource "google_project_service" "services" {
   disable_on_destroy = false
 }
 
-# Artifact Registry（Dockerレポ：既存があればそのまま使える）
-resource "google_artifact_registry_repository" "repo" {
+# Artifact Registry（既存リポを参照に変更）
+# いまの resource ブロックを削除して、↓の data ブロックにする
+data "google_artifact_registry_repository" "repo" {
   location      = var.region
   repository_id = "demo-repo"
-  description   = "Demo Docker repository"
-  format        = "DOCKER"
-  depends_on    = [google_project_service.services]
 }
 
 # まずは公開のサンプルイメージでデモ（自前ビルド不要）
