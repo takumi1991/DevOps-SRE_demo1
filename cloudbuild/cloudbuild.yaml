@@ -1,0 +1,21 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'asia-northeast1-docker.pkg.dev/devops-sre-demo1/demo-repo/hello:latest', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'asia-northeast1-docker.pkg.dev/devops-sre-demo1/demo-repo/hello:latest']
+  - name: 'gcr.io/cloud-builders/gcloud'
+    args:
+      [
+        'run',
+        'deploy',
+        'hello-demo',
+        '--image',
+        'asia-northeast1-docker.pkg.dev/devops-sre-demo1/demo-repo/hello:latest',
+        '--region',
+        'asia-northeast1',
+        '--platform',
+        'managed',
+        '--allow-unauthenticated',
+      ]
+images:
+  - 'asia-northeast1-docker.pkg.dev/devops-sre-demo1/demo-repo/hello:latest'
