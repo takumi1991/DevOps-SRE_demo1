@@ -1,13 +1,20 @@
 from flask import Flask, request, jsonify, Response
 from werkzeug.middleware.proxy_fix import ProxyFix
-import os, json, random, uuid
-from google.cloud import storage  # GCS に書き込む用
+import os, json, random, uuid, base64
+
+# Google Cloud
+from google.cloud import storage
+
+# Gemini (google-genai >= 0.3.0)
+try:
+    from google import genai
+except Exception:
+    genai = None  # ライブラリが無い場合でもサーバは起動できるように
 
 app = Flask(__name__)
-# Cloud Run のリバースプロキシヘッダを信頼
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
-# ---------------- 基本動作確認用 ----------------
+# ---------------- 基本ヘルス ----------------
 @app.route("/")
 def root():
     return "System Alive ✅"
@@ -30,59 +37,40 @@ def metrics():
     )
     return Response(text, mimetype="text/plain; version=0.0.4")
 
-# --- 追加：環境変数のデバッグ出力 ---
+# ---------------- デバッグ（今の環境変数） ----------------
 @app.route("/debug/env", methods=["GET"])
 def debug_env():
     masked = {}
     for k, v in os.environ.items():
-        masked[k] = "***" if any(x in k for x in ["KEY","SECRET","TOKEN","PASSWORD"]) else v
+        masked[k] = "***" if any(s in k for s in ["KEY","SECRET","TOKEN","PASSWORD"]) else v
     return jsonify({"env": masked})
 
 # ---------------- フォーム（性格診断） ----------------
 @app.route("/quiz", methods=["GET"])
 def quiz():
     return """
-<!doctype html>
-<html lang="ja">
-<meta charset="utf-8">
-<title>Horse Mint Demo</title>
+<!doctype html><html lang="ja"><meta charset="utf-8"><title>Horse Mint Demo</title>
 <body>
-  <h1>性格診断 → 馬トークン発行デモ</h1>
+  <h1>性格診断 → 馬トークン発行（Gemini画像生成版）</h1>
   <form method="post" action="/mint">
     <p>Q1: あなたの気質は？<br>
-      <select name="q1">
-        <option>冷静沈着</option>
-        <option>直感型</option>
-        <option>情熱家</option>
-      </select>
+      <select name="q1"><option>冷静沈着</option><option>直感型</option><option>情熱家</option></select>
     </p>
     <p>Q2: チーム or ソロ？<br>
-      <select name="q2">
-        <option>チーム</option>
-        <option>ソロ</option>
-      </select>
+      <select name="q2"><option>チーム</option><option>ソロ</option></select>
     </p>
     <p>Q3: 朝型 or 夜型？<br>
-      <select name="q3">
-        <option>朝型</option>
-        <option>夜型</option>
-      </select>
+      <select name="q3"><option>朝型</option><option>夜型</option></select>
     </p>
     <p>Q4: 重視する能力は？<br>
-      <select name="q4">
-        <option>スピード</option>
-        <option>スタミナ</option>
-        <option>スキル</option>
-      </select>
+      <select name="q4"><option>スピード</option><option>スタミナ</option><option>スキル</option></select>
     </p>
-    <p>Q5: 好みのカラーリング<br>
+    <p>Q5: 好みのカラーリング（例: 黒×金）<br>
       <input name="q5" placeholder="例: 黒×金">
     </p>
     <button type="submit">診断して発行</button>
   </form>
-  <p><small><a href="/metrics">/metrics</a> ・ <a href="/health">/health</a></small></p>
-</body>
-</html>
+</body></html>
     """
 
 # ---------------- ミント（発行）API ----------------
@@ -109,80 +97,128 @@ def mint():
         "catchphrase": "Ride on!",
     }
 
+    bucket_name = os.getenv("GCS_BUCKET")
+    use_gemini = True  # 常にGeminiを試す（失敗時はSVGにフォールバック）
+
+    asset_url = None
+    if bucket_name:
+        # 1) まず Gemini で PNG 画像生成を試す
+        if use_gemini:
+            try:
+                png_bytes = _gen_horse_with_gemini(horse)
+                if png_bytes:
+                    path = f"horses/{token_id}.png"
+                    _upload_bytes_to_gcs(bucket_name, path, png_bytes, "image/png")
+                    asset_url = f"https://storage.googleapis.com/{bucket_name}/{path}"
+                    print(f"[Gemini] image uploaded -> {asset_url}")
+            except Exception as e:
+                print(f"[Gemini][ERROR] {e}")
+
+        # 2) Gemini が失敗したら、SVG 馬シルエットを保存
+        if not asset_url:
+            try:
+                svg = _svg_for(horse).encode("utf-8")
+                path = f"horses/{token_id}.svg"
+                _upload_bytes_to_gcs(bucket_name, path, svg, "image/svg+xml")
+                asset_url = f"https://storage.googleapis.com/{bucket_name}/{path}"
+                print(f"[SVG] fallback uploaded -> {asset_url}")
+            except Exception as e:
+                print(f"[SVG][ERROR] {e}")
+    else:
+        print("[GCS] GCS_BUCKET not set; skip upload")
+
     res = {
         "ok": True,
         "token_id": token_id,
         "horse": horse,
         "permalink": f"{request.url_root}quiz?token={token_id}",
-        "asset_url": None,
+        "asset_url": asset_url,
+        "generator": "gemini" if (asset_url and asset_url.endswith(".png")) else "svg-fallback"
     }
 
-    # ---- GCS に SVG を保存（成功したら asset_url をセット）----
-    bucket_name = os.getenv("GCS_BUCKET")
-    if bucket_name:
-        try:
-            svg = _svg_for(horse).encode("utf-8")
-            path = f"horses/{token_id}.svg"
-            client = storage.Client()  # Cloud Run のデフォルトSA
-            bucket = client.bucket(bucket_name)
-            blob = bucket.blob(path)
-            blob.upload_from_string(svg, content_type="image/svg+xml")
-            res["asset_url"] = f"https://storage.googleapis.com/{bucket_name}/{path}"
-        except Exception as e:
-            # 失敗してもJSONには ok と token は返す（asset_urlはNone）
-            print(f"[GCS][ERROR] {e}")
-
-    # ←← ここが今回の改修：フォーム経由ならHTMLでリンクを表示
-    is_form_post = (request.content_type or "").startswith("application/x-www-form-urlencoded") \
-                   or "text/html" in (request.headers.get("Accept") or "")
-    if is_form_post and not request.is_json:
-        # クリック可能なリンクとシェア用パーマリンクを表示
-        asset_line = (f'<p>画像SVG: <a href="{res["asset_url"]}" target="_blank">{res["asset_url"]}</a></p>'
-                      if res["asset_url"] else "<p>画像の保存に失敗しました（asset_url=None）。</p>")
-        html = f"""
-<!doctype html>
-<html lang="ja"><meta charset="utf-8"><title>Mint結果</title>
-<body>
-  <h1>発行完了 🎉</h1>
-  <p>Token ID: <code>{res["token_id"]}</code></p>
-  {asset_line}
-  <p>パーマリンク: <a href="{res["permalink"]}" target="_blank">{res["permalink"]}</a></p>
-  <h2>Horse</h2>
-  <pre>{json.dumps(res["horse"], ensure_ascii=False, indent=2)}</pre>
-  <p><a href="/quiz">← もう一度診断する</a></p>
-</body></html>
-"""
-        return html, 200, {"Content-Type": "text/html; charset=utf-8"}
-
-    # API（JSONクライアント）にはJSONで返す
+    # フォームから来た時は見やすくHTMLでも返せる
+    if "text/html" in request.headers.get("Accept", "") and not request.is_json:
+        return (
+            "<pre>" + json.dumps(res, ensure_ascii=False, indent=2) + "</pre>",
+            200,
+            {"Content-Type": "text/html; charset=utf-8"},
+        )
     return jsonify(res)
 
-def _svg_for(horse: dict) -> str:
-    # SVGに馬のシルエットを簡易描画
-    body_color = "#654321"  # 茶色ベース
-    accent = "#000000"      # 黒いたてがみ・脚
-    text_color = "#222222"
+# ---------- Gemini 画像生成 ----------
+def _gen_horse_with_gemini(horse: dict) -> bytes | None:
+    """
+    Gemini の画像生成APIで馬のPNGを作る。
+    - google-genai>=0.3.0 を想定
+    - モデル名は 'imagen-3.0-generate'（現行の画像モデル）を利用
+    失敗時は None を返す。
+    """
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key or not genai:
+        print("[Gemini] client unavailable")
+        return None
 
+    prompt = (
+        "A stylized race horse full-body, dynamic pose, clean white background. "
+        f"Primary color theme: {horse['color']}. "
+        f"Personality: {horse['temperament']}. "
+        f"Playstyle: {horse['teamplay']}, Rhythm: {horse['rhythm']}. "
+        "Crisp 2D illustration, high contrast, no text overlay."
+    )
+
+    client = genai.Client(api_key=api_key)
+
+    # 画像サイズはコストと速度の妥協で 768 を採用（必要なら 1024 など）
+    resp = client.images.generate(
+        model="imagen-3.0-generate",
+        prompt=prompt,
+        size="768x768"
+    )
+
+    # 念のためいくつかのフィールド名に対応
+    try:
+        data0 = resp.data[0]
+    except Exception:
+        data0 = None
+
+    if not data0:
+        return None
+
+    # 代表的な返却形状に対応
+    if hasattr(data0, "b64_json") and data0.b64_json:
+        return base64.b64decode(data0.b64_json)
+    if getattr(data0, "image", None):
+        # SDK によっては bytes がそのまま入る
+        return data0.image
+    if getattr(data0, "content", None):
+        return data0.content  # bytes
+
+    # 他の形の場合は諦める
+    return None
+
+# ---------- GCS ユーティリティ ----------
+def _upload_bytes_to_gcs(bucket: str, path: str, content: bytes, content_type: str):
+    client = storage.Client()
+    b = client.bucket(bucket)
+    blob = b.blob(path)
+    blob.upload_from_string(content, content_type=content_type)
+
+# ---------- フォールバック SVG（馬シルエット） ----------
+def _svg_for(horse: dict) -> str:
+    body_color = "#654321"
+    accent = "#000000"
+    text_color = "#222222"
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360">
+  <!-- v2-silhouette -->
   <rect width="100%" height="100%" fill="white"/>
-  
-  <!-- 馬の胴体 -->
   <ellipse cx="320" cy="200" rx="120" ry="60" fill="{body_color}" />
-  
-  <!-- 馬の首と頭 -->
   <rect x="410" y="120" width="30" height="60" fill="{body_color}" />
   <circle cx="440" cy="120" r="20" fill="{body_color}" />
-  
-  <!-- 脚 -->
   <rect x="260" y="250" width="15" height="70" fill="{accent}" />
   <rect x="300" y="250" width="15" height="70" fill="{accent}" />
   <rect x="360" y="250" width="15" height="70" fill="{accent}" />
   <rect x="400" y="250" width="15" height="70" fill="{accent}" />
-
-  <!-- 尾 -->
   <path d="M 200 200 Q 180 240 220 220" stroke="{accent}" stroke-width="10" fill="none"/>
-
-  <!-- テキスト -->
   <text x="32" y="40" font-size="22" fill="{text_color}" font-family="monospace">
     {horse["name"]} ({horse["color"]})
   </text>
