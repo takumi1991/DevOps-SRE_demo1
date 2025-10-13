@@ -2,6 +2,8 @@ from flask import Flask, request, jsonify
 from flask import Response
 import json, random, uuid
 from werkzeug.middleware.proxy_fix import ProxyFix
+import os
+from google.cloud import storage
 
 app = Flask(__name__)
 
@@ -82,7 +84,6 @@ def mint():
     data = request.get_json(silent=True) or request.form.to_dict()
     token_id = str(uuid.uuid4())
 
-    # テキトーに能力値を振る（デモ）
     base = {"スピード": 7, "スタミナ": 6, "スキル": 6}
     key = (data.get("q4") or "").strip()
     if key in base:
@@ -105,10 +106,24 @@ def mint():
         "token_id": token_id,
         "horse": horse,
         "permalink": f"{request.url_root}quiz?token={token_id}",
-        "asset_url": None,  # 後で GCS 保存を入れるならここに URL を出す
+        "asset_url": None,
     }
 
-    # HTML で返したいとき（フォームからのアクセスを見やすく）
+    # ★★★ ここから GCS 保存（mint() の中）★★★
+    bucket_name = os.getenv("GCS_BUCKET")
+    if bucket_name:
+        svg = _svg_for(horse).encode("utf-8")
+        path = f"horses/{token_id}.svg"
+
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(path)
+        blob.upload_from_string(svg, content_type="image/svg+xml")
+
+        # 公開バケットならこのURLで見える
+        res["asset_url"] = f"https://storage.googleapis.com/{bucket_name}/{path}"
+    # ★★★ ここまで ★★★
+
     if "text/html" in request.headers.get("Accept", "") and not request.is_json:
         return (
             "<pre>" + json.dumps(res, ensure_ascii=False, indent=2) + "</pre>",
@@ -123,8 +138,7 @@ if __name__ == "__main__":
 
 
 
-import os
-from google.cloud import storage
+
 
 def _svg_for(horse):
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360">
@@ -137,13 +151,4 @@ def _svg_for(horse):
   <text x="32" y="230" font-size="20" font-family="monospace">Color: {horse["color"]}</text>
 </svg>'''
 
-# mint() 内の res 作成直後あたりに追加
-bucket_name = os.getenv("GCS_BUCKET")
-if bucket_name:
-    svg = _svg_for(horse).encode("utf-8")
-    path = f"horses/{token_id}.svg"
-    client = storage.Client()
-    bucket = client.bucket(bucket_name)
-    blob = bucket.blob(path)
-    blob.upload_from_string(svg, content_type="image/svg+xml")
-    res["asset_url"] = f"https://storage.googleapis.com/{bucket_name}/{path}"
+
