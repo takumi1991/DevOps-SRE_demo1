@@ -1,13 +1,12 @@
 from flask import Flask, request, jsonify, Response
 from werkzeug.middleware.proxy_fix import ProxyFix
-import os, json, random, uuid, traceback
 from google.cloud import storage
+import json, random, uuid, os, sys, traceback
 
 app = Flask(__name__)
-# Cloud Run の X-Forwarded-* を信頼
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
-# ---------- 基本エンドポイント ----------
+# --- ベーシックエンドポイント ---
 @app.route("/")
 def root():
     return "System Alive ✅"
@@ -30,13 +29,19 @@ def metrics():
     )
     return Response(text, mimetype="text/plain; version=0.0.4")
 
-# ---------- デバッグ: 実際に見えている環境変数を返す ----------
+# --- デバッグ用: 環境変数を確認 ---
 @app.route("/debug/env")
 def debug_env():
-    keys = ["GCS_BUCKET", "PORT"]
-    return jsonify({k: os.getenv(k) for k in keys})
+    wanted = {k: os.getenv(k) for k in [
+        "GCS_BUCKET", "GOOGLE_CLOUD_PROJECT", "K_SERVICE", "K_REVISION", "PORT"
+    ]}
+    return app.response_class(
+        response=json.dumps(wanted, ensure_ascii=False, indent=2),
+        status=200,
+        mimetype="application/json",
+    )
 
-# ---------- 性格診断フォーム ----------
+# --- 性格診断フォーム ---
 @app.route("/quiz", methods=["GET"])
 def quiz():
     return """
@@ -82,7 +87,7 @@ def quiz():
 </html>
     """
 
-# ---------- 画像（SVG）生成 ----------
+# --- SVG生成ヘルパー ---
 def _svg_for(horse):
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360">
   <rect width="100%" height="100%" fill="white"/>
@@ -94,13 +99,13 @@ def _svg_for(horse):
   <text x="32" y="230" font-size="20" font-family="monospace">Color: {horse["color"]}</text>
 </svg>'''
 
-# ---------- 発行API ----------
+# --- トークン発行API ---
 @app.route("/mint", methods=["POST"])
 def mint():
+    print("[mint] request received", file=sys.stdout, flush=True)
     data = request.get_json(silent=True) or request.form.to_dict()
     token_id = str(uuid.uuid4())
 
-    # 能力値（簡易）
     base = {"スピード": 7, "スタミナ": 6, "スキル": 6}
     key = (data.get("q4") or "").strip()
     if key in base:
@@ -126,9 +131,9 @@ def mint():
         "asset_url": None,
     }
 
-    # ---- GCS 保存（詳細ログ付き）----
     bucket_name = os.getenv("GCS_BUCKET")
-    print(f"[mint] GCS_BUCKET={bucket_name!r}")  # ★ログに出す
+    print(f"[mint] GCS_BUCKET={bucket_name}", file=sys.stdout, flush=True)
+
     if bucket_name:
         try:
             svg = _svg_for(horse).encode("utf-8")
@@ -137,13 +142,13 @@ def mint():
             bucket = client.bucket(bucket_name)
             blob = bucket.blob(path)
             blob.upload_from_string(svg, content_type="image/svg+xml")
+
             res["asset_url"] = f"https://storage.googleapis.com/{bucket_name}/{path}"
-            print(f"[mint] uploaded gs://{bucket_name}/{path}")  # ★ログ
+            print(f"[mint] uploaded gs://{bucket_name}/{path}", file=sys.stdout, flush=True)
         except Exception as e:
-            print(f"[mint] GCS upload failed: {e}")
+            print("[mint][ERROR] upload failed:", e, file=sys.stdout, flush=True)
             traceback.print_exc()
 
-    # HTML で見やすく
     if "text/html" in request.headers.get("Accept", "") and not request.is_json:
         return (
             "<pre>" + json.dumps(res, ensure_ascii=False, indent=2) + "</pre>",
@@ -151,16 +156,6 @@ def mint():
             {"Content-Type": "text/html; charset=utf-8"},
         )
     return jsonify(res)
-
-@app.route("/debug/env")
-def debug_env():
-    import os
-    return jsonify({
-        "GCS_BUCKET": os.getenv("GCS_BUCKET"),
-        "PORT": os.getenv("PORT"),
-        "SERVICE": os.getenv("K_SERVICE"),
-        "REVISION": os.getenv("K_REVISION"),
-    })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
