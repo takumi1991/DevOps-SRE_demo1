@@ -1,19 +1,25 @@
 from flask import Flask, request, jsonify, Response
 from werkzeug.middleware.proxy_fix import ProxyFix
-import os, json, random, uuid, traceback
-
-try:
-    from google.cloud import storage
-    HAS_GCS = True
-except Exception as e:
-    HAS_GCS = False
-    _gcs_import_error = str(e)
+import os, json, random, uuid
+from google.cloud import storage
 
 app = Flask(__name__)
-# Cloud Run のリバースプロキシヘッダを信頼
+# Cloud Run のプロキシヘッダを信頼
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
+# ---------- 画像(SVG)を生成するヘルパ ----------
+def _svg_for(horse: dict) -> str:
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360">
+  <rect width="100%" height="100%" fill="white"/>
+  <text x="32" y="64" font-size="28" font-family="monospace">Horse: {horse["name"]}</text>
+  <text x="32" y="110" font-size="20" font-family="monospace">Temp: {horse["temperament"]}</text>
+  <text x="32" y="140" font-size="20" font-family="monospace">Team: {horse["teamplay"]}</text>
+  <text x="32" y="170" font-size="20" font-family="monospace">Rhythm: {horse["rhythm"]}</text>
+  <text x="32" y="200" font-size="20" font-family="monospace">Speed/Stamina/Skill: {horse["speed"]}/{horse["stamina"]}/{horse["skill"]}</text>
+  <text x="32" y="230" font-size="20" font-family="monospace">Color: {horse["color"]}</text>
+</svg>'''
 
+# ---------- 既存の簡易エンドポイント ----------
 @app.route("/")
 def root():
     return "System Alive ✅"
@@ -36,78 +42,42 @@ def metrics():
     )
     return Response(text, mimetype="text/plain; version=0.0.4")
 
-# 追加: 環境変数と実行SAを見るデバッグ用
-@app.route("/debug/env")
-def debug_env():
-    return jsonify({
-        "GCS_BUCKET": os.getenv("GCS_BUCKET"),
-        "SERVICE_ACCOUNT": os.getenv("K_SERVICE_ACCOUNT") or os.getenv("GOOGLE_SERVICE_ACCOUNT") or "(unknown)",
-        "HAS_GCS_LIB": HAS_GCS,
-        "GCS_IMPORT_ERROR": None if HAS_GCS else _gcs_import_error,
-    })
-
+# ---------- 性格診断フォーム ----------
 @app.route("/quiz", methods=["GET"])
 def quiz():
     return """
 <!doctype html>
-<html lang="ja">
-<meta charset="utf-8">
-<title>Horse Mint Demo</title>
+<html lang="ja"><meta charset="utf-8"><title>Horse Mint Demo</title>
 <body>
   <h1>性格診断 → 馬トークン発行デモ</h1>
   <form method="post" action="/mint">
     <p>Q1: あなたの気質は？<br>
       <select name="q1">
-        <option>冷静沈着</option>
-        <option>直感型</option>
-        <option>情熱家</option>
+        <option>冷静沈着</option><option>直感型</option><option>情熱家</option>
       </select>
     </p>
     <p>Q2: チーム or ソロ？<br>
-      <select name="q2">
-        <option>チーム</option>
-        <option>ソロ</option>
-      </select>
+      <select name="q2"><option>チーム</option><option>ソロ</option></select>
     </p>
     <p>Q3: 朝型 or 夜型？<br>
-      <select name="q3">
-        <option>朝型</option>
-        <option>夜型</option>
-      </select>
+      <select name="q3"><option>朝型</option><option>夜型</option></select>
     </p>
     <p>Q4: 重視する能力は？<br>
-      <select name="q4">
-        <option>スピード</option>
-        <option>スタミナ</option>
-        <option>スキル</option>
-      </select>
+      <select name="q4"><option>スピード</option><option>スタミナ</option><option>スキル</option></select>
     </p>
-    <p>Q5: 好みのカラーリング<br>
-      <input name="q5" placeholder="例: 黒×金">
-    </p>
+    <p>Q5: 好みのカラーリング<br><input name="q5" placeholder="例: 黒×金"></p>
     <button type="submit">診断して発行</button>
   </form>
-</body>
-</html>
+</body></html>
     """
 
-def _svg_for(horse: dict) -> str:
-    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360">
-  <rect width="100%" height="100%" fill="white"/>
-  <text x="32" y="64" font-size="28" font-family="monospace">Horse: {horse["name"]}</text>
-  <text x="32" y="110" font-size="20" font-family="monospace">Temp: {horse["temperament"]}</text>
-  <text x="32" y="140" font-size="20" font-family="monospace">Team: {horse["teamplay"]}</text>
-  <text x="32" y="170" font-size="20" font-family="monospace">Rhythm: {horse["rhythm"]}</text>
-  <text x="32" y="200" font-size="20" font-family="monospace">Speed/Stamina/Skill: {horse["speed"]}/{horse["stamina"]}/{horse["skill"]}</text>
-  <text x="32" y="230" font-size="20" font-family="monospace">Color: {horse["color"]}</text>
-</svg>'''
-
+# ---------- 発行API（GCSへSVG保存） ----------
 @app.route("/mint", methods=["POST"])
 def mint():
     data = request.get_json(silent=True) or request.form.to_dict()
     token_id = str(uuid.uuid4())
 
-    # 能力値（指定した能力をブースト）
+    # 能力値をざっくり決める
     base = {"スピード": 7, "スタミナ": 6, "スキル": 6}
     key = (data.get("q4") or "").strip()
     if key in base:
@@ -131,16 +101,11 @@ def mint():
         "horse": horse,
         "permalink": f"{request.url_root}quiz?token={token_id}",
         "asset_url": None,
-        "debug": {  # ←診断用
-            "bucket": os.getenv("GCS_BUCKET"),
-            "has_gcs_lib": HAS_GCS,
-        },
-        "gcs_error": None
     }
 
-    # --- GCS への保存（例外を握りつぶさずレスポンスに載せる） ---
+    # GCS 保存
     bucket_name = os.getenv("GCS_BUCKET")
-    if bucket_name and HAS_GCS:
+    if bucket_name:
         try:
             svg = _svg_for(horse).encode("utf-8")
             path = f"horses/{token_id}.svg"
@@ -148,16 +113,13 @@ def mint():
             bucket = client.bucket(bucket_name)
             blob = bucket.blob(path)
             blob.upload_from_string(svg, content_type="image/svg+xml")
+            # 公開バケットならこのURLで閲覧可能
             res["asset_url"] = f"https://storage.googleapis.com/{bucket_name}/{path}"
         except Exception as e:
-            res["gcs_error"] = f"{type(e).__name__}: {e}"
-            app.logger.exception("GCS upload failed")
-    elif not bucket_name:
-        res["gcs_error"] = "No GCS_BUCKET env"
-    elif not HAS_GCS:
-        res["gcs_error"] = f"google-cloud-storage import error: {_gcs_import_error}"
+            # 失敗しても Mint 自体は返す（ログに理由を出す）
+            print(f"[mint] GCS upload failed: {e}")
 
-    # HTML希望なら見やすく
+    # HTML で見やすく返す（フォームPOST向け）
     if "text/html" in request.headers.get("Accept", "") and not request.is_json:
         return (
             "<pre>" + json.dumps(res, ensure_ascii=False, indent=2) + "</pre>",
@@ -166,6 +128,6 @@ def mint():
         )
     return jsonify(res)
 
-
+# ---------- エントリポイント（最後に置く） ----------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
