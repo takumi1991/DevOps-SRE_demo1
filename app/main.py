@@ -152,5 +152,14 @@ def mint():
         )
     return jsonify(res)
 
+@app.route("/debug/env")
+def debug_env():
+    import os
+    return jsonify({
+        "GCS_BUCKET": os.getenv("GCS_BUCKET"),
+        "PORT": os.getenv("PORT"),
+        "SERVICE_ACCOUNT": os.getenv("K_SERVICE"),
+    })
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
