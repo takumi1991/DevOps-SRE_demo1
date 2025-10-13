@@ -1,28 +1,19 @@
 from flask import Flask, request, jsonify, Response
-import json, random, uuid, os
 from werkzeug.middleware.proxy_fix import ProxyFix
-from google.cloud import storage
+import os, json, random, uuid, traceback
+
+try:
+    from google.cloud import storage
+    HAS_GCS = True
+except Exception as e:
+    HAS_GCS = False
+    _gcs_import_error = str(e)
 
 app = Flask(__name__)
-
-# --- Cloud Run 用のプロキシ設定 ---
+# Cloud Run のリバースプロキシヘッダを信頼
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
-# --- SVG 生成関数（馬のカード画像）---
-def _svg_for(horse):
-    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360">
-  <rect width="100%" height="100%" fill="white"/>
-  <text x="32" y="64" font-size="28" font-family="monospace">Horse: {horse["name"]}</text>
-  <text x="32" y="110" font-size="20" font-family="monospace">Temp: {horse["temperament"]}</text>
-  <text x="32" y="140" font-size="20" font-family="monospace">Team: {horse["teamplay"]}</text>
-  <text x="32" y="170" font-size="20" font-family="monospace">Rhythm: {horse["rhythm"]}</text>
-  <text x="32" y="200" font-size="20" font-family="monospace">
-    Speed/Stamina/Skill: {horse["speed"]}/{horse["stamina"]}/{horse["skill"]}
-  </text>
-  <text x="32" y="230" font-size="20" font-family="monospace">Color: {horse["color"]}</text>
-</svg>'''
 
-# --- ヘルスチェック系 ---
 @app.route("/")
 def root():
     return "System Alive ✅"
@@ -45,7 +36,16 @@ def metrics():
     )
     return Response(text, mimetype="text/plain; version=0.0.4")
 
-# --- 性格診断フォーム（HTML）---
+# 追加: 環境変数と実行SAを見るデバッグ用
+@app.route("/debug/env")
+def debug_env():
+    return jsonify({
+        "GCS_BUCKET": os.getenv("GCS_BUCKET"),
+        "SERVICE_ACCOUNT": os.getenv("K_SERVICE_ACCOUNT") or os.getenv("GOOGLE_SERVICE_ACCOUNT") or "(unknown)",
+        "HAS_GCS_LIB": HAS_GCS,
+        "GCS_IMPORT_ERROR": None if HAS_GCS else _gcs_import_error,
+    })
+
 @app.route("/quiz", methods=["GET"])
 def quiz():
     return """
@@ -91,13 +91,23 @@ def quiz():
 </html>
     """
 
-# --- 発行API（SVGをGCSに保存）---
+def _svg_for(horse: dict) -> str:
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360">
+  <rect width="100%" height="100%" fill="white"/>
+  <text x="32" y="64" font-size="28" font-family="monospace">Horse: {horse["name"]}</text>
+  <text x="32" y="110" font-size="20" font-family="monospace">Temp: {horse["temperament"]}</text>
+  <text x="32" y="140" font-size="20" font-family="monospace">Team: {horse["teamplay"]}</text>
+  <text x="32" y="170" font-size="20" font-family="monospace">Rhythm: {horse["rhythm"]}</text>
+  <text x="32" y="200" font-size="20" font-family="monospace">Speed/Stamina/Skill: {horse["speed"]}/{horse["stamina"]}/{horse["skill"]}</text>
+  <text x="32" y="230" font-size="20" font-family="monospace">Color: {horse["color"]}</text>
+</svg>'''
+
 @app.route("/mint", methods=["POST"])
 def mint():
     data = request.get_json(silent=True) or request.form.to_dict()
     token_id = str(uuid.uuid4())
 
-    # 能力値をランダムで設定
+    # 能力値（指定した能力をブースト）
     base = {"スピード": 7, "スタミナ": 6, "スキル": 6}
     key = (data.get("q4") or "").strip()
     if key in base:
@@ -121,12 +131,17 @@ def mint():
         "horse": horse,
         "permalink": f"{request.url_root}quiz?token={token_id}",
         "asset_url": None,
+        "debug": {  # ←診断用
+            "bucket": os.getenv("GCS_BUCKET"),
+            "has_gcs_lib": HAS_GCS,
+        },
+        "gcs_error": None
     }
 
-    # --- GCS に保存 ---
+    # --- GCS への保存（例外を握りつぶさずレスポンスに載せる） ---
     bucket_name = os.getenv("GCS_BUCKET")
-    try:
-        if bucket_name:
+    if bucket_name and HAS_GCS:
+        try:
             svg = _svg_for(horse).encode("utf-8")
             path = f"horses/{token_id}.svg"
             client = storage.Client()
@@ -134,9 +149,15 @@ def mint():
             blob = bucket.blob(path)
             blob.upload_from_string(svg, content_type="image/svg+xml")
             res["asset_url"] = f"https://storage.googleapis.com/{bucket_name}/{path}"
-    except Exception as e:
-        res["gcs_error"] = str(e)
+        except Exception as e:
+            res["gcs_error"] = f"{type(e).__name__}: {e}"
+            app.logger.exception("GCS upload failed")
+    elif not bucket_name:
+        res["gcs_error"] = "No GCS_BUCKET env"
+    elif not HAS_GCS:
+        res["gcs_error"] = f"google-cloud-storage import error: {_gcs_import_error}"
 
+    # HTML希望なら見やすく
     if "text/html" in request.headers.get("Accept", "") and not request.is_json:
         return (
             "<pre>" + json.dumps(res, ensure_ascii=False, indent=2) + "</pre>",
@@ -144,6 +165,7 @@ def mint():
             {"Content-Type": "text/html; charset=utf-8"},
         )
     return jsonify(res)
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
