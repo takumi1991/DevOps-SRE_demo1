@@ -120,3 +120,30 @@ def mint():
 if __name__ == "__main__":
     import os
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
+
+
+
+import os
+from google.cloud import storage
+
+def _svg_for(horse):
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360">
+  <rect width="100%" height="100%" fill="white"/>
+  <text x="32" y="64" font-size="28" font-family="monospace">Horse: {horse["name"]}</text>
+  <text x="32" y="110" font-size="20" font-family="monospace">Temp: {horse["temperament"]}</text>
+  <text x="32" y="140" font-size="20" font-family="monospace">Team: {horse["teamplay"]}</text>
+  <text x="32" y="170" font-size="20" font-family="monospace">Rhythm: {horse["rhythm"]}</text>
+  <text x="32" y="200" font-size="20" font-family="monospace">Speed/Stamina/Skill: {horse["speed"]}/{horse["stamina"]}/{horse["skill"]}</text>
+  <text x="32" y="230" font-size="20" font-family="monospace">Color: {horse["color"]}</text>
+</svg>'''
+
+# mint() 内の res 作成直後あたりに追加
+bucket_name = os.getenv("GCS_BUCKET")
+if bucket_name:
+    svg = _svg_for(horse).encode("utf-8")
+    path = f"horses/{token_id}.svg"
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(path)
+    blob.upload_from_string(svg, content_type="image/svg+xml")
+    res["asset_url"] = f"https://storage.googleapis.com/{bucket_name}/{path}"
