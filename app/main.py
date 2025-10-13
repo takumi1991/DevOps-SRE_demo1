@@ -158,14 +158,40 @@ def mint():
     return jsonify(res)
 
 def _svg_for(horse: dict) -> str:
+    # SVGに馬のシルエットを簡易描画
+    body_color = "#654321"  # 茶色ベース
+    accent = "#000000"      # 黒いたてがみ・脚
+    text_color = "#222222"
+
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360">
   <rect width="100%" height="100%" fill="white"/>
-  <text x="32" y="64" font-size="28" font-family="monospace">Horse: {horse["name"]}</text>
-  <text x="32" y="110" font-size="20" font-family="monospace">Temp: {horse["temperament"]}</text>
-  <text x="32" y="140" font-size="20" font-family="monospace">Team: {horse["teamplay"]}</text>
-  <text x="32" y="170" font-size="20" font-family="monospace">Rhythm: {horse["rhythm"]}</text>
-  <text x="32" y="200" font-size="20" font-family="monospace">Speed/Stamina/Skill: {horse["speed"]}/{horse["stamina"]}/{horse["skill"]}</text>
-  <text x="32" y="230" font-size="20" font-family="monospace">Color: {horse["color"]}</text>
+  
+  <!-- 馬の胴体 -->
+  <ellipse cx="320" cy="200" rx="120" ry="60" fill="{body_color}" />
+  
+  <!-- 馬の首と頭 -->
+  <rect x="410" y="120" width="30" height="60" fill="{body_color}" />
+  <circle cx="440" cy="120" r="20" fill="{body_color}" />
+  
+  <!-- 脚 -->
+  <rect x="260" y="250" width="15" height="70" fill="{accent}" />
+  <rect x="300" y="250" width="15" height="70" fill="{accent}" />
+  <rect x="360" y="250" width="15" height="70" fill="{accent}" />
+  <rect x="400" y="250" width="15" height="70" fill="{accent}" />
+
+  <!-- 尾 -->
+  <path d="M 200 200 Q 180 240 220 220" stroke="{accent}" stroke-width="10" fill="none"/>
+
+  <!-- テキスト -->
+  <text x="32" y="40" font-size="22" fill="{text_color}" font-family="monospace">
+    {horse["name"]} ({horse["color"]})
+  </text>
+  <text x="32" y="70" font-size="16" fill="{text_color}" font-family="monospace">
+    {horse["temperament"]} / {horse["teamplay"]} / {horse["rhythm"]}
+  </text>
+  <text x="32" y="95" font-size="16" fill="{text_color}" font-family="monospace">
+    Speed:{horse["speed"]}  Sta:{horse["stamina"]}  Skill:{horse["skill"]}
+  </text>
 </svg>'''
 
 if __name__ == "__main__":
