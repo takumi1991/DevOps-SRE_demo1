@@ -1,15 +1,28 @@
-from flask import Flask, request, jsonify
-from flask import Response
-import json, random, uuid
+from flask import Flask, request, jsonify, Response
+import json, random, uuid, os
 from werkzeug.middleware.proxy_fix import ProxyFix
-import os
 from google.cloud import storage
 
 app = Flask(__name__)
 
-# Cloud Run の X-Forwarded-* を信頼
+# --- Cloud Run 用のプロキシ設定 ---
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
-# --- 既存の簡易エンドポイント ---
+
+# --- SVG 生成関数（馬のカード画像）---
+def _svg_for(horse):
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360">
+  <rect width="100%" height="100%" fill="white"/>
+  <text x="32" y="64" font-size="28" font-family="monospace">Horse: {horse["name"]}</text>
+  <text x="32" y="110" font-size="20" font-family="monospace">Temp: {horse["temperament"]}</text>
+  <text x="32" y="140" font-size="20" font-family="monospace">Team: {horse["teamplay"]}</text>
+  <text x="32" y="170" font-size="20" font-family="monospace">Rhythm: {horse["rhythm"]}</text>
+  <text x="32" y="200" font-size="20" font-family="monospace">
+    Speed/Stamina/Skill: {horse["speed"]}/{horse["stamina"]}/{horse["skill"]}
+  </text>
+  <text x="32" y="230" font-size="20" font-family="monospace">Color: {horse["color"]}</text>
+</svg>'''
+
+# --- ヘルスチェック系 ---
 @app.route("/")
 def root():
     return "System Alive ✅"
@@ -32,7 +45,7 @@ def metrics():
     )
     return Response(text, mimetype="text/plain; version=0.0.4")
 
-# --- 追加: 性格診断フォーム ---
+# --- 性格診断フォーム（HTML）---
 @app.route("/quiz", methods=["GET"])
 def quiz():
     return """
@@ -78,12 +91,13 @@ def quiz():
 </html>
     """
 
-# --- 追加: 発行API（まずはローカル計算のみ / ストレージ保存なし） ---
+# --- 発行API（SVGをGCSに保存）---
 @app.route("/mint", methods=["POST"])
 def mint():
     data = request.get_json(silent=True) or request.form.to_dict()
     token_id = str(uuid.uuid4())
 
+    # 能力値をランダムで設定
     base = {"スピード": 7, "スタミナ": 6, "スキル": 6}
     key = (data.get("q4") or "").strip()
     if key in base:
@@ -109,20 +123,19 @@ def mint():
         "asset_url": None,
     }
 
-    # ★★★ ここから GCS 保存（mint() の中）★★★
+    # --- GCS に保存 ---
     bucket_name = os.getenv("GCS_BUCKET")
-    if bucket_name:
-        svg = _svg_for(horse).encode("utf-8")
-        path = f"horses/{token_id}.svg"
-
-        client = storage.Client()
-        bucket = client.bucket(bucket_name)
-        blob = bucket.blob(path)
-        blob.upload_from_string(svg, content_type="image/svg+xml")
-
-        # 公開バケットならこのURLで見える
-        res["asset_url"] = f"https://storage.googleapis.com/{bucket_name}/{path}"
-    # ★★★ ここまで ★★★
+    try:
+        if bucket_name:
+            svg = _svg_for(horse).encode("utf-8")
+            path = f"horses/{token_id}.svg"
+            client = storage.Client()
+            bucket = client.bucket(bucket_name)
+            blob = bucket.blob(path)
+            blob.upload_from_string(svg, content_type="image/svg+xml")
+            res["asset_url"] = f"https://storage.googleapis.com/{bucket_name}/{path}"
+    except Exception as e:
+        res["gcs_error"] = str(e)
 
     if "text/html" in request.headers.get("Accept", "") and not request.is_json:
         return (
@@ -131,24 +144,6 @@ def mint():
             {"Content-Type": "text/html; charset=utf-8"},
         )
     return jsonify(res)
-    
+
 if __name__ == "__main__":
-    import os
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
-
-
-
-
-
-def _svg_for(horse):
-    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360">
-  <rect width="100%" height="100%" fill="white"/>
-  <text x="32" y="64" font-size="28" font-family="monospace">Horse: {horse["name"]}</text>
-  <text x="32" y="110" font-size="20" font-family="monospace">Temp: {horse["temperament"]}</text>
-  <text x="32" y="140" font-size="20" font-family="monospace">Team: {horse["teamplay"]}</text>
-  <text x="32" y="170" font-size="20" font-family="monospace">Rhythm: {horse["rhythm"]}</text>
-  <text x="32" y="200" font-size="20" font-family="monospace">Speed/Stamina/Skill: {horse["speed"]}/{horse["stamina"]}/{horse["skill"]}</text>
-  <text x="32" y="230" font-size="20" font-family="monospace">Color: {horse["color"]}</text>
-</svg>'''
-
-
