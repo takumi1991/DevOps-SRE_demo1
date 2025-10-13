@@ -1,9 +1,12 @@
 from flask import Flask, request, jsonify
 from flask import Response
 import json, random, uuid
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
 
+# Cloud Run の X-Forwarded-* を信頼
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 # --- 既存の簡易エンドポイント ---
 @app.route("/")
 def root():
