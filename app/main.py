@@ -158,7 +158,8 @@ def debug_env():
     return jsonify({
         "GCS_BUCKET": os.getenv("GCS_BUCKET"),
         "PORT": os.getenv("PORT"),
-        "SERVICE_ACCOUNT": os.getenv("K_SERVICE"),
+        "SERVICE": os.getenv("K_SERVICE"),
+        "REVISION": os.getenv("K_REVISION"),
     })
 
 if __name__ == "__main__":
