@@ -1,5 +1,6 @@
 substitutions:
   _REGION: asia-northeast1
+  _SERVICE: horse-demo
   _AR_REPO: demo-repo
   _IMAGE_NAME: horse
   _APP_DIR: app
