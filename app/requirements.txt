@@ -4,3 +4,4 @@ google-cloud-firestore==2.16.0   # （使わないなら外してOK）
 Pillow==10.4.0                   # 画像の簡単変換に使用（任意）
 requests==2.32.3
 google-genai>=0.3.0
+gunicorn==22.0.0
