@@ -25,6 +25,16 @@ steps:
     id: push-latest
     args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:latest']
 
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+  id: notify
+  entrypoint: bash
+  args:
+    - -c
+    - |
+      gcloud pubsub topics publish image-updated \
+        --message="deploy" \
+        --attribute="image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:$SHORT_SHA"
+
 images:
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:$SHORT_SHA'
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:latest'
