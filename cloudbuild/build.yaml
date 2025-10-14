@@ -1,9 +1,12 @@
+# cloudbuild/build.yaml
 substitutions:
   _REGION: asia-northeast1
-  _SERVICE: horse-demo
   _AR_REPO: demo-repo
   _IMAGE_NAME: horse
   _APP_DIR: app
+
+options:
+  logging: CLOUD_LOGGING_ONLY
 
 steps:
   - name: gcr.io/cloud-builders/docker
@@ -12,39 +15,23 @@ steps:
     args:
       - build
       - -t
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:$SHORT_SHA'
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:${SHORT_SHA}
       - -t
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:latest'
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:latest
       - .
 
   - name: gcr.io/cloud-builders/docker
     id: push-sha
-    args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:$SHORT_SHA']
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:${SHORT_SHA}
 
   - name: gcr.io/cloud-builders/docker
     id: push-latest
-    args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:latest']
-
-  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
-  id: notify
-  entrypoint: bash
-  args:
-    - -c
-    - |
-      gcloud pubsub topics publish image-updated \
-        --message="deploy" \
-        --attribute="image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:$SHORT_SHA"
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:latest
 
 images:
-  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:$SHORT_SHA'
-  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:latest'
-# 既存の push ステップの直後に追加
-- name: gcr.io/google.com/cloudsdktool/cloud-sdk
-  id: notify
-  entrypoint: bash
-  args:
-    - -c
-    - |
-      gcloud pubsub topics publish image-updated \
-        --message="deploy" \
-        --attribute="image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:$SHORT_SHA"
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:latest
