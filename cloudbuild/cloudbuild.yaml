@@ -43,6 +43,7 @@ steps:
           --region='${_REGION}' \
           --platform=managed \
           --quiet
+          --no-wait 
 
 images:
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:$SHORT_SHA'
