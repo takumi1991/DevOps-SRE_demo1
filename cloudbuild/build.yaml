@@ -1,17 +1,29 @@
+substitutions:
+  _REGION: asia-northeast1
+  _AR_REPO: demo-repo
+  _IMAGE_NAME: horse
+  _APP_DIR: app
+
 steps:
   - name: gcr.io/cloud-builders/docker
+    id: build
+    dir: ${_APP_DIR}
     args:
-      [ "build", "-t", "$_AR_HOST/$_PROJECT/$PROJECT_ID/demo-repo/demo:$COMMIT_SHA", "./app" ]
+      - build
+      - -t
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:$SHORT_SHA'
+      - -t
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:latest'
+      - .
+
   - name: gcr.io/cloud-builders/docker
-    args:
-      [ "push", "$_AR_HOST/$_PROJECT/$PROJECT_ID/demo-repo/demo:$COMMIT_SHA" ]
-  - name: gcr.io/cloud-builders/gcloud
-    args:
-      [ "artifacts", "docker", "tags", "add",
-        "$_AR_HOST/$_PROJECT/$PROJECT_ID/demo-repo/demo:$COMMIT_SHA",
-        "$_AR_HOST/$_PROJECT/$PROJECT_ID/demo-repo/demo:latest" ]
-substitutions:
-  _AR_HOST: "REGION-docker.pkg.dev"
-  _PROJECT: ""   # 空でOK（projectID直下）
+    id: push-sha
+    args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:$SHORT_SHA']
+
+  - name: gcr.io/cloud-builders/docker
+    id: push-latest
+    args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:latest']
+
 images:
-  - "$_AR_HOST/$_PROJECT/$PROJECT_ID/demo-repo/demo:$COMMIT_SHA"
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:$SHORT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:latest'
