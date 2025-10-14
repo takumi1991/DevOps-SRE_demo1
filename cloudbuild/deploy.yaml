@@ -1,18 +1,17 @@
-substitutions:
-  _REGION: asia-northeast1
-  _SERVICE: horse-demo
-  _IMAGE: ""  # Pub/Sub の属性で上書きされる
-
+# cloudbuild/deploy.yaml
 steps:
 - name: gcr.io/google.com/cloudsdktool/cloud-sdk
-  id: deploy
   entrypoint: bash
   args:
-    - -c
-    - |
-      echo "Deploying ${_SERVICE} with image: ${_IMAGE}"
-      gcloud run deploy ${_SERVICE} \
-        --image="${_IMAGE}" \
-        --region="${_REGION}" \
+  - -c
+  - |
+      set -euo pipefail
+      IMG="asia-northeast1-docker.pkg.dev/$PROJECT_ID/demo-repo/horse:latest"
+      echo "[deploy] image=${IMG}"
+      gcloud run deploy horse-demo \
+        --image="${IMG}" \
+        --region=asia-northeast1 \
         --platform=managed \
         --quiet
+options:
+  logging: CLOUD_LOGGING_ONLY
