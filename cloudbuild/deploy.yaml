@@ -1,32 +1,13 @@
 steps:
-  # 🏗️ 1. アプリのビルド
-  - name: 'gcr.io/cloud-builders/docker'
-    args:
-      - 'build'
-      - '-t'
-      - 'asia-northeast1-docker.pkg.dev/devops-sre-demo1/demo-repo/horse:latest'
-      - '.'
-
-  # 📤 2. Artifact Registry に push
-  - name: 'gcr.io/cloud-builders/docker'
-    args:
-      - 'push'
-      - 'asia-northeast1-docker.pkg.dev/devops-sre-demo1/demo-repo/horse:latest'
-
-  # 🚀 3. Cloud Run に自動デプロイ
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    id: 'deploy-to-run'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        echo "🚀 Deploying to Cloud Run..."
+- name: gcr.io/google.com/cloudsdktool/cloud-sdk
+  entrypoint: bash
+  args:
+    - -c
+    - |
+        set -euo pipefail
+        echo "[deploy] deploying latest image manually..."
         gcloud run deploy horse-demo \
           --image=asia-northeast1-docker.pkg.dev/devops-sre-demo1/demo-repo/horse:latest \
           --region=asia-northeast1 \
           --platform=managed \
-          --allow-unauthenticated \
           --quiet
-
-images:
-  - 'asia-northeast1-docker.pkg.dev/devops-sre-demo1/demo-repo/horse:latest'
