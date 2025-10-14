@@ -1,22 +1,19 @@
-steps:
-  - name: gcr.io/cloud-builders/kubectl
-    args: ["version", "--client"]
-  - name: gcr.io/cloud-builders/gcloud
-    args:
-      [ "container", "clusters", "get-credentials",
-        "$_CLUSTER", "--region", "$_REGION", "--project", "$PROJECT_ID" ]
-  - name: gcr.io/cloud-builders/kubectl
-    args:
-      [ "set", "image", "deployment/demo-app",
-        "demo=$_AR_HOST/$_PROJECT/$PROJECT_ID/demo-repo/demo:latest" ]
-  - name: gcr.io/cloud-builders/kubectl
-    args: [ "apply", "-f", "k8s/deployment.yaml" ]
-  - name: gcr.io/cloud-builders/kubectl
-    args: [ "apply", "-f", "k8s/service.yaml" ]
-  - name: gcr.io/cloud-builders/kubectl
-    args: [ "apply", "-f", "k8s/hpa.yaml" ]
 substitutions:
-  _CLUSTER: "gke-autopilot-demo"
-  _REGION:  "asia-northeast1"
-  _AR_HOST: "REGION-docker.pkg.dev"
-  _PROJECT: ""
+  _REGION: asia-northeast1
+  _SERVICE: horse-demo
+  _AR_REPO: demo-repo
+  _IMAGE_NAME: horse
+
+steps:
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: deploy
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        echo "Deploying latest image to Cloud Run..."
+        gcloud run deploy ${_SERVICE} \
+          --image="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_IMAGE_NAME}:latest" \
+          --region="${_REGION}" \
+          --platform=managed \
+          --quiet
