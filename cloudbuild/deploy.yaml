@@ -1,4 +1,9 @@
-# cloudbuild/deploy.yaml
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+substitutions:
+  _IMAGE: ""  # Pub/Sub の message attribute "image" がここに入る
+
 steps:
 - name: gcr.io/google.com/cloudsdktool/cloud-sdk
   entrypoint: bash
@@ -6,12 +11,15 @@ steps:
   - -c
   - |
       set -euo pipefail
-      IMG="asia-northeast1-docker.pkg.dev/$PROJECT_ID/demo-repo/horse:latest"
-      echo "[deploy] image=${IMG}"
+      echo "[deploy] image=${_IMAGE}"
+      if [[ -z "${_IMAGE}" ]]; then
+        echo "ERROR: _IMAGE is empty. Make sure Pub/Sub attribute 'image' is set." >&2
+        exit 1
+      fi
+      # デプロイ。timeout を長めにして起動待ち失敗を回避
       gcloud run deploy horse-demo \
-        --image="${IMG}" \
+        --image="${_IMAGE}" \
         --region=asia-northeast1 \
         --platform=managed \
+        --timeout=300 \
         --quiet
-options:
-  logging: CLOUD_LOGGING_ONLY
