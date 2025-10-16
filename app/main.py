@@ -17,7 +17,7 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 # ---------------- 基本ヘルス ----------------
 @app.route("/")
 def root():
-    return "✅ System Alive ✅ (build: v20251016-21:45)"
+    return "✅ System Alive ✅ (build: v20251016-22:45)"
 
 @app.route("/health")
 def health():
