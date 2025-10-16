@@ -1,7 +1,17 @@
+<<<<<<< HEAD
+=======
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+substitutions:
+  _IMAGE: ""
+
+>>>>>>> 0efc02d (fix: add deploy step for Cloud Run)
 steps:
 - name: gcr.io/google.com/cloudsdktool/cloud-sdk
   entrypoint: bash
   args:
+<<<<<<< HEAD
     - -c
     - |
         set -euo pipefail
@@ -11,3 +21,18 @@ steps:
           --region=asia-northeast1 \
           --platform=managed \
           --quiet
+=======
+  - -c
+  - |
+      set -euo pipefail
+      echo "[deploy] image=${_IMAGE}"
+      if [[ -z "${_IMAGE}" ]]; then
+        echo "ERROR: _IMAGE is empty" >&2
+        exit 1
+      fi
+      gcloud run deploy horse-demo \
+        --image="${_IMAGE}" \
+        --region=asia-northeast1 \
+        --platform=managed \
+        --quiet
+>>>>>>> 0efc02d (fix: add deploy step for Cloud Run)
