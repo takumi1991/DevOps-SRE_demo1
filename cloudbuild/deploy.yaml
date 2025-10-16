@@ -5,7 +5,7 @@ steps:
     - -c
     - |
         set -euo pipefail
-        echo "[deploy] deploying latest image manually..."
+        echo "[deploy] deploying latest image..."
         gcloud run deploy horse-demo \
           --image=asia-northeast1-docker.pkg.dev/devops-sre-demo1/demo-repo/horse:latest \
           --region=asia-northeast1 \
